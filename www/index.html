@@ -5213,8 +5213,7 @@ function applyCustomRest(save) {
 
 function startRestTimer(secs) {
   requestNotifPermission();
-  requestNativeNotifPermission();
-  scheduleNativeRestNotification(secs);
+  requestNativeNotifPermission().then(() => scheduleNativeRestNotification(secs));
   if (restInterval) clearInterval(restInterval);
   restTotal     = secs;
   restRemaining = secs;
