@@ -27,6 +27,9 @@ jobs:
       - name: Add Android platform
         run: npx cap add android || true
 
+      - name: Generate app icons
+        run: npx @capacitor/assets generate --android --iconBackgroundColor '#0f0f0f' --iconBackgroundColorDark '#0f0f0f'
+
       - name: Sync Capacitor
         run: npx cap sync android
 
