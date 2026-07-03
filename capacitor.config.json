@@ -1,0 +1,13 @@
+{
+  "appId": "com.esdras.saiyajinfit",
+  "appName": "SaiyajinFit",
+  "webDir": "www",
+  "bundledWebRuntime": false,
+  "plugins": {
+    "LocalNotifications": {
+      "smallIcon": "ic_stat_icon_config_sample",
+      "iconColor": "#FF7A1A",
+      "sound": "beep.wav"
+    }
+  }
+}
