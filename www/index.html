@@ -2233,6 +2233,12 @@ function handleAppForeground() {
       disp.style.color = '#22c55e';
       disp.textContent = '✔';
       document.getElementById('rest-sub').textContent = 'concluído!';
+      // O descanso terminou enquanto o app estava em segundo plano — a
+      // notificação nativa já deve ter avisado, mas dispara também o alerta
+      // local (vibração/som/banner) agora que o app voltou a ficar visível,
+      // caso a notificação do sistema não tenha chegado (permissão negada,
+      // economia de bateria, etc).
+      fireRestNotification();
       setTimeout(() => closeRestModal(), 1400);
     }
   }
@@ -5041,11 +5047,34 @@ function isNativeApp() {
   } catch(e) {}
 })();
 
+let _restNotifPermissionWarned = false;
+
 async function requestNativeNotifPermission() {
   if (!isNativeApp()) return;
   try {
     const { LocalNotifications } = window.Capacitor.Plugins;
-    await LocalNotifications.requestPermissions();
+    const result = await LocalNotifications.requestPermissions();
+    // Se a permissão foi negada, o Android nunca vai mostrar a notificação de
+    // "descanso acabou" quando o app estiver em segundo plano — avisa o
+    // usuário uma vez, em vez de falhar em silêncio pra sempre.
+    if (result && result.display && result.display !== 'granted' && !_restNotifPermissionWarned) {
+      _restNotifPermissionWarned = true;
+      showToast('⚠️ Ative as notificações do app pra ser avisado quando o descanso acabar');
+    }
+    // Cria (ou garante) um canal de notificação com prioridade máxima —
+    // sem isso, o Android pode entregar a notificação "silenciosamente"
+    // (sem som, sem pop-up na tela), mesmo com a permissão concedida.
+    if (LocalNotifications.createChannel) {
+      await LocalNotifications.createChannel({
+        id: 'rest-timer',
+        name: 'Descanso entre séries',
+        description: 'Avisa quando o tempo de descanso termina',
+        importance: 5,      // IMPORTANCE_HIGH: pop-up + som na tela de bloqueio
+        visibility: 1,
+        sound: 'default',
+        vibration: true,
+      });
+    }
   } catch(e) {}
 }
 
@@ -5059,7 +5088,11 @@ async function scheduleNativeRestNotification(secs) {
         id: REST_NOTIF_ID,
         title: '✅ Terminou o descanso!',
         body: 'Hora de voltar ao treino 💪',
-        schedule: { at: new Date(Date.now() + secs * 1000) },
+        channelId: 'rest-timer',
+        schedule: {
+          at: new Date(Date.now() + secs * 1000),
+          allowWhileIdle: true, // dispara mesmo no modo Doze/economia de bateria do Android
+        },
         sound: 'default',
       }]
     });
@@ -5251,8 +5284,10 @@ function applyCustomRest(save) {
 
 function startRestTimer(secs) {
   requestNotifPermission();
-  requestNativeNotifPermission();
-  scheduleNativeRestNotification(secs);
+  // Garante que o canal de notificação e a permissão já estejam prontos
+  // antes de agendar — evita uma corrida em que o agendamento roda antes
+  // da criação do canal (podia acontecer no primeiro descanso do app).
+  requestNativeNotifPermission().then(() => scheduleNativeRestNotification(secs));
   if (restInterval) clearInterval(restInterval);
   restTotal     = secs;
   restRemaining = secs;
@@ -7249,6 +7284,9 @@ renderRoutines();
 buildExList(DB);
 calRefresh(); // inicializa o calendário com os dados já carregados
 renderLastBackupLabel();
+// Prepara canal + permissão de notificação nativa já na abertura do app,
+// em vez de só no primeiro descanso — evita atraso/corrida na primeira vez.
+requestNativeNotifPermission();
 
 </script>
 </body>
