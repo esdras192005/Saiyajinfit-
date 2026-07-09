@@ -27,6 +27,12 @@ jobs:
       - name: Add Android platform
         run: npx cap add android || true
 
+      - name: Copy native rest notification files
+        run: |
+          mkdir -p android/app/src/main/java/com/esdras/saiyajinfit
+          cp resources/native/RestNotificationPlugin.java android/app/src/main/java/com/esdras/saiyajinfit/RestNotificationPlugin.java
+          cp resources/native/MainActivity.java android/app/src/main/java/com/esdras/saiyajinfit/MainActivity.java
+
       - name: Generate app icons
         run: npx @capacitor/assets generate --android --iconBackgroundColor '#0f0f0f' --iconBackgroundColorDark '#0f0f0f'
 
