@@ -2156,6 +2156,29 @@ let timerAccumulated = 0;   // segundos acumulados antes da última retomada
 let timerStartTime   = null; // timestamp (Date.now()) do último início/retomada
 let woSelectedDate    = null; // Date escolhida para registrar o treino (permite registro retroativo)
 
+// Formata duração "longa" (histórico, resumo, comparação, imagem de compartilhamento):
+// menos de 1h -> "42min" · 1h ou mais -> "1h 26min"
+function formatDurationLong(totalSeconds) {
+  const s = Math.max(0, Math.floor(totalSeconds || 0));
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  if (h > 0) return `${h}h ${String(m).padStart(2, '0')}min`;
+  return `${m}min`;
+}
+
+// Formata o relógio ao vivo do treino em andamento:
+// menos de 1h -> "42:07" · 1h ou mais -> "1:26:59"
+function formatDurationClock(totalSeconds) {
+  const s = Math.max(0, Math.floor(totalSeconds || 0));
+  const h  = Math.floor(s / 3600);
+  const m  = Math.floor((s % 3600) / 60);
+  const ss = s % 60;
+  const mm  = String(m).padStart(2, '0');
+  const sss = String(ss).padStart(2, '0');
+  if (h > 0) return `${h}:${mm}:${sss}`;
+  return `${mm}:${sss}`;
+}
+
 function recalcTimerSeconds() {
   if (timerStartTime !== null && !timerPaused) {
     timerSeconds = timerAccumulated + Math.floor((Date.now() - timerStartTime) / 1000);
@@ -2168,9 +2191,7 @@ function recalcTimerSeconds() {
 function renderTimerDisplay() {
   const timerEl = document.getElementById('wo-timer');
   if (!timerEl) return;
-  const mm = String(Math.floor(timerSeconds / 60)).padStart(2, '0');
-  const ss = String(timerSeconds % 60).padStart(2, '0');
-  timerEl.textContent = mm + ':' + ss;
+  timerEl.textContent = formatDurationClock(timerSeconds);
 }
 
 function ymdLocal(d) {
@@ -3469,8 +3490,7 @@ function renderHistory() {
   }
   el.innerHTML = '';
   workoutHistory.forEach((w, i) => {
-    const mm = String(Math.floor((w.seconds||0)/60)).padStart(2,'0');
-    const ss = String((w.seconds||0)%60).padStart(2,'0');
+    const durLabel = formatDurationLong(w.seconds || 0);
     const div = document.createElement('div');
     div.className = 'workout-card fade-in';
     div.innerHTML = `
@@ -3480,7 +3500,7 @@ function renderHistory() {
           <div style="font-size:11px;color:var(--text-muted);margin-top:2px;">${w.date}</div>
         </div>
         <div style="display:flex;align-items:center;gap:6px;flex-shrink:0;">
-          <span class="workout-tag">${mm}:${ss}</span>
+          <span class="workout-tag">${durLabel}</span>
           <button onclick="shareWorkout(${i})" title="Compartilhar" style="background:var(--bg-input);border:1px solid var(--border);color:var(--accent-bright);border-radius:6px;width:28px;height:28px;display:flex;align-items:center;justify-content:center;cursor:pointer;padding:0;flex-shrink:0;">
             <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.6" y1="10.6" x2="15.4" y2="6.4"/><line x1="8.6" y1="13.4" x2="15.4" y2="17.6"/></svg>
           </button>
@@ -3777,8 +3797,6 @@ function buildWorkoutShareCanvas(w) {
   cursorY += 60;
 
   // estatísticas
-  const mm = String(Math.floor((w.seconds || 0) / 60)).padStart(2, '0');
-  const ss = String((w.seconds || 0) % 60).padStart(2, '0');
   const totalVol = calcWorkoutVolume(w);
   let totalSets = 0;
   (w.exercises || []).forEach(exN => {
@@ -3787,7 +3805,7 @@ function buildWorkoutShareCanvas(w) {
   });
 
   const stats = [
-    { label: 'DURAÇÃO', value: `${mm}:${ss}` },
+    { label: 'DURAÇÃO', value: formatDurationLong(w.seconds || 0) },
     { label: 'VOLUME',  value: fmtVol(totalVol) },
     { label: 'SÉRIES',  value: String(totalSets) }
   ];
@@ -4036,7 +4054,7 @@ function openCompareWorkout() {
   const volDiff = volNow - volPrev;
   const volPct  = volPrev > 0 ? Math.round((volDiff / volPrev) * 100) : null;
   const durPrev = prev.seconds || 0, durNow = w.seconds || 0;
-  const mmss = s => String(Math.floor(s/60)).padStart(2,'0') + ':' + String(s%60).padStart(2,'0');
+  const mmss = s => formatDurationLong(s);
 
   const summary = document.createElement('div');
   summary.style.cssText = 'background:var(--bg-card);border:1px solid var(--border);border-radius:14px;padding:14px;margin-bottom:16px;';
@@ -6186,15 +6204,14 @@ function calRenderDayDetail() {
   el.innerHTML = `<div class="cal-day-detail"><div class="cal-day-detail-title">📅 ${dd}/${mm}/${yyyy}</div>` +
     ws.map(w => {
       const exs   = (w.exercises||[]).slice(0,3).join(' · ') + ((w.exercises||[]).length>3?' …':'');
-      const mmStr = String(Math.floor((w.seconds||0)/60)).padStart(2,'0');
-      const ssStr = String((w.seconds||0)%60).padStart(2,'0');
+      const durStr = formatDurationLong(w.seconds || 0);
       return `<div class="cal-wo-row">
         <div class="cal-wo-icon">🏋️</div>
         <div style="flex:1;min-width:0;">
           <div class="cal-wo-name">${w.name}</div>
           <div class="cal-wo-meta">${exs||'—'}</div>
         </div>
-        <span class="workout-tag">${mmStr}:${ssStr}</span>
+        <span class="workout-tag">${durStr}</span>
       </div>`;
     }).join('') + '</div>';
 }
