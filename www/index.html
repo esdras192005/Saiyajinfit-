@@ -5330,60 +5330,49 @@ function startRestTimer(secs) {
   }, 1000);
 }
 
-// ── Notificação de countdown em segundo plano ──
-let _swReg = null;
-
-async function getSwReg() {
-  if (_swReg) return _swReg;
-  if (!('serviceWorker' in navigator)) return null;
-  try {
-    // SW mínimo via blob
-    const code = `self.addEventListener('notificationclick',e=>{e.notification.close();clients.openWindow('/');});`;
-    const blob  = new Blob([code], { type: 'text/javascript' });
-    const url   = URL.createObjectURL(blob);
-    _swReg = await navigator.serviceWorker.register(url, { scope: '/' });
-    await navigator.serviceWorker.ready;
-    return _swReg;
-  } catch(e) { return null; }
-}
+// ── Notificação de progresso nativa (barra real, estilo Hevy) ──
+const REST_PROGRESS_NOTIF_ID = 991200;
 
 async function showCountdownNotification(remaining) {
-  if (!('Notification' in window) || Notification.permission !== 'granted') return;
   const m   = Math.floor(remaining / 60);
   const s   = remaining % 60;
   const txt = m > 0 ? `${m}:${String(s).padStart(2,'0')}` : `${s}s`;
 
-  // Barra de progresso em unicode (10 blocos)
-  const pct    = restTotal > 0 ? remaining / restTotal : 0;
-  const filled = Math.round(pct * 10);
-  const bar    = '█'.repeat(filled) + '░'.repeat(10 - filled);
+  if (isNativeApp()) {
+    try {
+      const { RestNotification } = window.Capacitor.Plugins;
+      if (RestNotification) {
+        const elapsed = Math.max(0, restTotal - remaining);
+        await RestNotification.update({
+          id: REST_PROGRESS_NOTIF_ID,
+          title: '⏱ Repouso ' + txt,
+          text: 'Hora de voltar ao treino 💪',
+          max: restTotal,
+          progress: elapsed,
+        });
+      }
+    } catch(e) {}
+    return;
+  }
 
-  const opts = {
-    body: `${bar}  ${txt} restando`,
-    tag: 'rest-countdown',
-    renotify: false,
-    silent: true,
-    requireInteraction: true,
-  };
-
+  // Fallback pra quando roda só no navegador (fora do APK)
+  if (!('Notification' in window) || Notification.permission !== 'granted') return;
   try {
-    const reg = await getSwReg();
-    if (reg) {
-      await reg.showNotification('⏱ Descanso em andamento', opts);
-    } else if (Notification.permission === 'granted') {
-      new Notification('⏱ Descanso em andamento', opts);
-    }
+    new Notification('⏱ Repouso ' + txt, {
+      body: 'Hora de voltar ao treino 💪',
+      tag: 'rest-countdown',
+      silent: true,
+    });
   } catch(e) {}
 }
 
 async function cancelCountdownNotification() {
-  try {
-    const reg = await getSwReg();
-    if (reg) {
-      const notifs = await reg.getNotifications({ tag: 'rest-countdown' });
-      notifs.forEach(n => n.close());
-    }
-  } catch(e) {}
+  if (isNativeApp()) {
+    try {
+      const { RestNotification } = window.Capacitor.Plugins;
+      if (RestNotification) await RestNotification.cancel({ id: REST_PROGRESS_NOTIF_ID });
+    } catch(e) {}
+  }
 }
 
 function updateRestUI() {
