@@ -861,6 +861,12 @@
     font-size:28px;font-weight:900;color:#fff;font-family:'Inter',sans-serif;
     box-shadow:inset 0 1px 0 rgba(255,255,255,.18), 0 2px 8px rgba(0,0,0,.4);
   }
+  .hero-avatar-remove-btn{
+    position:absolute;top:-2px;right:-2px;width:18px;height:18px;border-radius:50%;
+    background:#ef4444;border:2px solid var(--surface-3);
+    display:none;align-items:center;justify-content:center;
+    cursor:pointer;z-index:5;padding:0;
+  }
   .hero-lvl-pill{
     position:absolute;bottom:-4px;left:50%;transform:translateX(-50%);
     background:linear-gradient(135deg,var(--gold-bright),var(--gold));
@@ -1062,11 +1068,15 @@
         <svg id="theme-mini-icon" viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></svg>
       </button>
       <div class="hero-top">
-        <div class="hero-avatar-wrap" id="hero-avatar-wrap">
+        <div class="hero-avatar-wrap" id="hero-avatar-wrap" onclick="openAvatarPicker()" title="Toque para adicionar uma foto" style="cursor:pointer;">
           <div class="hero-avatar-ring" id="hero-ring"></div>
           <div class="hero-avatar" id="hero-avatar-initial">A</div>
+          <button class="hero-avatar-remove-btn" id="hero-avatar-remove-btn" onclick="event.stopPropagation(); removeHeroAvatar();" title="Remover foto">
+            <svg viewBox="0 0 24 24" width="10" height="10" fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
+          </button>
           <div class="hero-lvl-pill">NÍV. <span id="hero-level">1</span></div>
         </div>
+        <input type="file" id="hero-avatar-input" accept="image/*" style="display:none;" onchange="handleAvatarFileSelect(event)">
         <div class="hero-id">
           <div class="hero-name-row" onclick="editHeroName()">
             <div class="hero-name" id="hero-name">Atleta</div>
@@ -1161,7 +1171,7 @@
         <button class="btn-primary" style="margin:0;" onclick="exportBackup()"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;vertical-align:-2px;margin-right:5px;"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/></svg>Exportar JSON</button>
         <button class="btn-primary" style="margin:0;background:var(--bg-input);color:var(--accent-bright);border:1px solid var(--border-glow);" onclick="document.getElementById('backup-file-input').click()"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;vertical-align:-2px;margin-right:5px;"><path d="M12 21V9"/><path d="m7 14 5-5 5 5"/><path d="M5 3h14"/></svg>Importar JSON</button>
       </div>
-      <input type="file" id="backup-file-input" accept="application/json,.json" style="display:none;" onchange="handleBackupFileSelect(event)">
+      <input type="file" id="backup-file-input" accept=".json,application/json,application/octet-stream,text/plain,*/*" style="display:none;" onchange="handleBackupFileSelect(event)">
       <div id="backup-last-export" style="font-size:11px;color:var(--text-muted);text-align:center;margin-top:4px;"></div>
     </div>
   </div>
@@ -2287,22 +2297,48 @@ function buildBackupObject() {
   };
 }
 
-function exportBackup() {
+async function exportBackup() {
   try {
     const backup = buildBackupObject();
     const json = JSON.stringify(backup, null, 2);
-    const blob = new Blob([json], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
     const now = new Date();
     const pad = n => String(n).padStart(2, '0');
     const fname = `saiyajinfit-backup-${now.getFullYear()}${pad(now.getMonth()+1)}${pad(now.getDate())}-${pad(now.getHours())}${pad(now.getMinutes())}.json`;
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = fname;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    setTimeout(() => URL.revokeObjectURL(url), 2000);
+
+    if (isNativeApp()) {
+      // Dentro do APK: <a download> não funciona no WebView (não dispara
+      // download nenhum, mas também não lança erro — por isso o toast
+      // aparecia mesmo sem salvar nada). Aqui escrevemos o arquivo de
+      // verdade via Filesystem e abrimos o menu nativo de compartilhar,
+      // pra você escolher salvar no Drive, Downloads, mandar no WhatsApp etc.
+      const { Filesystem, Share } = window.Capacitor.Plugins;
+      const writeResult = await Filesystem.writeFile({
+        path: fname,
+        data: json,
+        directory: 'CACHE',
+        encoding: 'utf8',
+      });
+      if (Share) {
+        await Share.share({
+          title: 'Backup SaiyajinFit',
+          text: 'Backup dos seus treinos',
+          url: writeResult.uri,
+          dialogTitle: 'Salvar backup em...',
+        });
+      }
+    } else {
+      // Fallback: roda só no navegador (fora do APK) — aqui o <a download> funciona normal
+      const blob = new Blob([json], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = fname;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      setTimeout(() => URL.revokeObjectURL(url), 2000);
+    }
+
     localStorage.setItem('lastBackupExport', now.toISOString());
     renderLastBackupLabel();
     showToast('Backup exportado!');
@@ -2496,6 +2532,74 @@ function updateStats() {
   renderDeloadBanner();
   renderWeekSummary();
   renderProfileHero();
+}
+
+// ═══════════════════════════════════
+//  FOTO DE PERFIL (avatar do herói)
+// ═══════════════════════════════════
+const HERO_AVATAR_KEY = 'heroAvatarDataUrl';
+
+function openAvatarPicker() {
+  document.getElementById('hero-avatar-input').click();
+}
+
+function handleAvatarFileSelect(event) {
+  const file = event.target.files[0];
+  event.target.value = ''; // permite escolher o mesmo arquivo de novo depois
+  if (!file) return;
+  if (!file.type || !file.type.startsWith('image/')) { showToast('Escolha um arquivo de imagem'); return; }
+
+  const reader = new FileReader();
+  reader.onload = e => {
+    const img = new Image();
+    img.onload = () => {
+      // Recorta em quadrado (centralizado) e redimensiona, pra não pesar no localStorage
+      const size = 300;
+      const canvas = document.createElement('canvas');
+      canvas.width = size; canvas.height = size;
+      const ctx = canvas.getContext('2d');
+      const minSide = Math.min(img.width, img.height);
+      const sx = (img.width - minSide) / 2;
+      const sy = (img.height - minSide) / 2;
+      ctx.drawImage(img, sx, sy, minSide, minSide, 0, 0, size, size);
+      const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
+      try {
+        localStorage.setItem(HERO_AVATAR_KEY, dataUrl);
+      } catch (err) {
+        showToast('Imagem muito grande pra salvar, tenta outra');
+        return;
+      }
+      applyHeroAvatar(dataUrl);
+      showToast('Foto de perfil atualizada!');
+    };
+    img.onerror = () => showToast('Não consegui abrir essa imagem');
+    img.src = e.target.result;
+  };
+  reader.onerror = () => showToast('Erro ao ler a imagem');
+  reader.readAsDataURL(file);
+}
+
+function applyHeroAvatar(dataUrl) {
+  const el = document.getElementById('hero-avatar-initial');
+  const removeBtn = document.getElementById('hero-avatar-remove-btn');
+  if (!el) return;
+  if (dataUrl) {
+    el.style.backgroundImage = `url("${dataUrl}")`;
+    el.style.backgroundSize = 'cover';
+    el.style.backgroundPosition = 'center';
+    el.textContent = '';
+    if (removeBtn) removeBtn.style.display = 'flex';
+  } else {
+    el.style.backgroundImage = '';
+    el.textContent = getHeroName().charAt(0).toUpperCase();
+    if (removeBtn) removeBtn.style.display = 'none';
+  }
+}
+
+function removeHeroAvatar() {
+  localStorage.removeItem(HERO_AVATAR_KEY);
+  renderProfileHero(); // reaplica a letra + gradiente padrão do rank
+  showToast('Foto removida');
 }
 
 // ═══════════════════════════════════
@@ -2853,6 +2957,10 @@ function renderProfileHero() {
   rankEl.style.backgroundImage = `linear-gradient(135deg, ${rankColor.c1}, ${rankColor.c2})`;
   document.getElementById('hero-ring').style.setProperty('--ring-color', rankColor.c1);
   document.getElementById('hero-avatar-initial').style.backgroundImage = `linear-gradient(150deg, ${rankColor.c1}, ${rankColor.c2} 80%)`;
+
+  // Se o usuário já tiver uma foto de perfil salva, ela sobrepõe o gradiente/letra padrão
+  const savedAvatar = localStorage.getItem(HERO_AVATAR_KEY);
+  if (savedAvatar) applyHeroAvatar(savedAvatar);
 
   // ── Detecta subida de nível ANTES de animar a barra, pra escolher o tipo de animação ──
   const leveledUp = (heroLastLevel !== null && level > heroLastLevel);
@@ -3808,10 +3916,35 @@ function dataUrlToBlob(dataUrl) {
 
 async function nativeShareWorkoutImage() {
   if (!currentShareDataUrl) return;
-  const blob = dataUrlToBlob(currentShareDataUrl);
-  const file = new File([blob], currentShareFileName, { type: 'image/png' });
   const shareText = shareWorkoutRef ? `${shareWorkoutRef.name} 💪⚡ #SaiyajinFit` : 'Treino #SaiyajinFit';
 
+  if (isNativeApp()) {
+    try {
+      const { Filesystem, Share } = window.Capacitor.Plugins;
+      const base64Data = currentShareDataUrl.split(',')[1];
+      const writeResult = await Filesystem.writeFile({
+        path: currentShareFileName,
+        data: base64Data,
+        directory: 'CACHE',
+      });
+      await Share.share({
+        title: 'Meu treino',
+        text: shareText,
+        files: [writeResult.uri],
+        dialogTitle: 'Compartilhar treino',
+      });
+    } catch (e) {
+      // Usuário cancelando o menu de compartilhar não é erro de verdade
+      if (!(e && e.message && /cancel/i.test(e.message))) {
+        showToast('Erro ao compartilhar imagem');
+      }
+    }
+    return;
+  }
+
+  // Fallback: roda só no navegador (fora do APK)
+  const blob = dataUrlToBlob(currentShareDataUrl);
+  const file = new File([blob], currentShareFileName, { type: 'image/png' });
   if (navigator.canShare && navigator.canShare({ files: [file] })) {
     try {
       await navigator.share({ files: [file], title: 'Meu treino', text: shareText });
@@ -3820,14 +3953,40 @@ async function nativeShareWorkoutImage() {
       if (e && e.name === 'AbortError') return;
     }
   }
-  // Fallback: baixa a imagem e abre o WhatsApp já com o texto pronto
   downloadWorkoutImage();
   const waUrl = 'https://wa.me/?text=' + encodeURIComponent(shareText + '\n\n(imagem baixada — anexe ela na conversa do zap)');
   window.open(waUrl, '_blank');
 }
 
-function downloadWorkoutImage() {
+async function downloadWorkoutImage() {
   if (!currentShareDataUrl) return;
+
+  if (isNativeApp()) {
+    try {
+      const { Filesystem, Share } = window.Capacitor.Plugins;
+      const base64Data = currentShareDataUrl.split(',')[1];
+      const writeResult = await Filesystem.writeFile({
+        path: currentShareFileName,
+        data: base64Data,
+        directory: 'CACHE',
+      });
+      if (Share) {
+        await Share.share({
+          title: 'Salvar imagem do treino',
+          files: [writeResult.uri],
+          dialogTitle: 'Salvar imagem em...',
+        });
+      }
+      showToast('✔ Imagem pronta pra salvar!');
+    } catch (e) {
+      if (!(e && e.message && /cancel/i.test(e.message))) {
+        showToast('Erro ao baixar imagem');
+      }
+    }
+    return;
+  }
+
+  // Fallback: roda só no navegador (fora do APK) — aqui o <a download> funciona normal
   const a = document.createElement('a');
   a.href = currentShareDataUrl;
   a.download = currentShareFileName;
