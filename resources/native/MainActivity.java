@@ -7,6 +7,7 @@ public class MainActivity extends BridgeActivity {
     @Override
     public void onCreate(Bundle savedInstanceState) {
         registerPlugin(RestNotificationPlugin.class);
+        registerPlugin(BatteryOptimizationPlugin.class);
         super.onCreate(savedInstanceState);
     }
 }
