@@ -1161,6 +1161,15 @@
     <div class="section-label">Histórico de Treinos</div>
     <div id="workout-history"></div>
 
+    <!-- ── NOTIFICAÇÕES EM SEGUNDO PLANO ── -->
+    <div class="section-label" style="margin-top:18px;">Notificações</div>
+    <div class="card" style="margin-bottom:16px;">
+      <div style="font-size:11px;color:var(--text-muted);margin-bottom:10px;line-height:1.5;">
+        Libere o app da economia de bateria do Android pra garantir que o aviso de "descanso acabou" chegue na hora certa, mesmo com o app em segundo plano.
+      </div>
+      <button class="btn-primary" style="margin:0;" onclick="handleBatteryOptButtonClick()"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;vertical-align:-2px;margin-right:5px;"><path d="M11 20V4a2 2 0 0 1 2-2h1"/><path d="M14 22V2"/><path d="M7 10h10"/><rect x="3" y="6" width="4" height="12" rx="1"/></svg>Liberar notificações em segundo plano</button>
+    </div>
+
     <!-- ── BACKUP / RESTAURAÇÃO ── -->
     <div class="section-label" style="margin-top:18px;">Backup</div>
     <div class="card" style="margin-bottom:16px;">
@@ -5425,6 +5434,32 @@ async function cancelNativeRestNotification() {
   try {
     const { LocalNotifications } = window.Capacitor.Plugins;
     await LocalNotifications.cancel({ notifications: [{ id: REST_NOTIF_ID }] });
+  } catch(e) {}
+}
+
+// ═══════════════════════════════════
+//  OTIMIZAÇÃO DE BATERIA — pede pro Android liberar o app da economia
+//  de energia, pra evitar que o aviso de "descanso acabou" atrase quando
+//  o app está em segundo plano. Só faz algo dentro do APK nativo.
+// ═══════════════════════════════════
+async function isIgnoringBatteryOptimizations() {
+  if (!isNativeApp()) return true;
+  try {
+    const { BatteryOptimization } = window.Capacitor.Plugins;
+    const result = await BatteryOptimization.isIgnoringBatteryOptimizations();
+    return result.ignoring;
+  } catch(e) { return true; }
+}
+
+async function handleBatteryOptButtonClick() {
+  const ignoring = await isIgnoringBatteryOptimizations();
+  if (ignoring) {
+    showToast('✅ Já está liberado! O app pode rodar livremente em segundo plano.');
+    return;
+  }
+  try {
+    const { BatteryOptimization } = window.Capacitor.Plugins;
+    await BatteryOptimization.requestIgnoreBatteryOptimizations();
   } catch(e) {}
 }
 
