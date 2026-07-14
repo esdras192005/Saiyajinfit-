@@ -37,6 +37,7 @@ public class RestNotificationPlugin extends Plugin {
         }
     }
 
+    // ---- Mantido para compatibilidade com chamadas existentes do JS ----
     @PluginMethod
     public void update(PluginCall call) {
         ensureChannel();
@@ -75,6 +76,35 @@ public class RestNotificationPlugin extends Plugin {
     @PluginMethod
     public void cancel(PluginCall call) {
         NotificationManagerCompat.from(getContext()).cancel(call.getInt("id", 991200));
+        call.resolve();
+    }
+
+    // ---- Novos métodos: timer nativo que continua rodando em segundo plano ----
+    @PluginMethod
+    public void start(PluginCall call) {
+        ensureChannel();
+        int seconds = call.getInt("seconds", 90);
+        String title = call.getString("title", "Descanso");
+
+        Context ctx = getContext();
+        Intent intent = new Intent(ctx, RestTimerService.class);
+        intent.putExtra("seconds", seconds);
+        intent.putExtra("title", title);
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            ctx.startForegroundService(intent);
+        } else {
+            ctx.startService(intent);
+        }
+        call.resolve();
+    }
+
+    @PluginMethod
+    public void stop(PluginCall call) {
+        Context ctx = getContext();
+        Intent intent = new Intent(ctx, RestTimerService.class);
+        intent.setAction("STOP");
+        ctx.startService(intent);
         call.resolve();
     }
 }
