@@ -29,12 +29,17 @@ jobs:
 
       - name: Add exact alarm permission
         run: |
-          sed -i '/<application/i\    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />\n    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />' android/app/src/main/AndroidManifest.xml
+          sed -i '/<application/i\    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />\n    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />\n    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />\n    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />' android/app/src/main/AndroidManifest.xml
+
+      - name: Add rest timer service declaration
+        run: |
+          sed -i '/<\/application>/i\    <service\n        android:name=".RestTimerService"\n        android:exported="false"\n        android:foregroundServiceType="specialUse">\n        <property\n            android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"\n            android:value="rest_timer_countdown" />\n    </service>' android/app/src/main/AndroidManifest.xml
 
       - name: Copy native rest notification files
         run: |
           mkdir -p android/app/src/main/java/com/esdras/saiyajinfit
           cp resources/native/RestNotificationPlugin.java android/app/src/main/java/com/esdras/saiyajinfit/RestNotificationPlugin.java
+          cp resources/native/RestTimerService.java android/app/src/main/java/com/esdras/saiyajinfit/RestTimerService.java
           cp resources/native/MainActivity.java android/app/src/main/java/com/esdras/saiyajinfit/MainActivity.java
           cp resources/native/BatteryOptimizationPlugin.java android/app/src/main/java/com/esdras/saiyajinfit/BatteryOptimizationPlugin.java
 
