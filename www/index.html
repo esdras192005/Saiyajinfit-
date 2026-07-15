@@ -5658,7 +5658,9 @@ function startRestTimer(secs) {
   document.getElementById('rest-modal').style.display = 'flex';
 
   // Mostra notificação persistente de contagem regressiva
-  showCountdownNotification(secs);
+  // (no app nativo, isso dispara um serviço em segundo plano que continua
+  // contando sozinho mesmo se o app congelar; no navegador, cai no fallback)
+  startNativeCountdownNotification(secs);
 
   restInterval = setInterval(() => {
     // Recalcula sempre a partir do relógio real, nunca decrementando "no escuro".
@@ -5680,14 +5682,38 @@ function startRestTimer(secs) {
       setTimeout(() => closeRestModal(), 1400);
     } else {
       updateRestUI();
-      // Atualiza notificação de countdown a cada segundo
-      showCountdownNotification(restRemaining);
+      // No app nativo, o serviço em segundo plano já atualiza a notificação
+      // sozinho a cada segundo. Só precisamos fazer isso manualmente no
+      // fallback do navegador (fora do APK).
+      if (!isNativeApp()) {
+        showCountdownNotification(restRemaining);
+      }
     }
   }, 1000);
 }
 
 // ── Notificação de progresso nativa (barra real, estilo Hevy) ──
 const REST_PROGRESS_NOTIF_ID = 991200;
+
+// Inicia o timer nativo em segundo plano (Android Service), que continua
+// contando e atualizando a notificação mesmo se o WebView congelar.
+// Chamado UMA VEZ no início do descanso — nada de update() repetido por JS.
+async function startNativeCountdownNotification(totalSecs) {
+  if (isNativeApp()) {
+    try {
+      const { RestNotification } = window.Capacitor.Plugins;
+      if (RestNotification && RestNotification.start) {
+        await RestNotification.start({
+          seconds: totalSecs,
+          title: '⏱ Repouso',
+        });
+        return;
+      }
+    } catch(e) {}
+  }
+  // Fallback pra quando roda só no navegador (fora do APK)
+  showCountdownNotification(totalSecs);
+}
 
 async function showCountdownNotification(remaining) {
   const m   = Math.floor(remaining / 60);
@@ -5726,7 +5752,12 @@ async function cancelCountdownNotification() {
   if (isNativeApp()) {
     try {
       const { RestNotification } = window.Capacitor.Plugins;
-      if (RestNotification) await RestNotification.cancel({ id: REST_PROGRESS_NOTIF_ID });
+      // stop() encerra o serviço em segundo plano por completo (não só a notificação)
+      if (RestNotification && RestNotification.stop) {
+        await RestNotification.stop();
+      } else if (RestNotification) {
+        await RestNotification.cancel({ id: REST_PROGRESS_NOTIF_ID });
+      }
     } catch(e) {}
   }
 }
@@ -5764,6 +5795,7 @@ function adjustRest(delta) {
   restTotal     = Math.max(restTotal, restRemaining);
   restEndTime   = Date.now() + restRemaining * 1000; // realinha a fonte da verdade
   scheduleNativeRestNotification(restRemaining);      // reagenda a notificação nativa pro novo horário
+  startNativeCountdownNotification(restRemaining);    // reinicia o serviço de countdown com o novo tempo
   updateRestUI();
 }
 
