@@ -10,6 +10,7 @@ import android.os.Build;
 import android.os.Handler;
 import android.os.IBinder;
 import android.os.Looper;
+import android.os.SystemClock;
 import androidx.core.app.NotificationCompat;
 import androidx.core.app.NotificationManagerCompat;
 
@@ -20,7 +21,8 @@ public class RestTimerService extends Service {
 
     private Handler handler;
     private Runnable tickRunnable;
-    private long endTimeMillis;
+    private long endTimeMillis;      // wall-clock alvo (System.currentTimeMillis)
+    private long endElapsedRealtime; // alvo em relógio "de boot" (usado pelo Chronometer)
     private int totalSeconds;
     private String title;
 
@@ -54,27 +56,33 @@ public class RestTimerService extends Service {
         totalSeconds = intent.getIntExtra("seconds", 90);
         title = intent.getStringExtra("title");
         if (title == null) title = "Descanso";
-        endTimeMillis = System.currentTimeMillis() + (totalSeconds * 1000L);
 
-        startForeground(NOTIF_ID, buildNotification(totalSeconds, totalSeconds));
+        long now = System.currentTimeMillis();
+        endTimeMillis = now + (totalSeconds * 1000L);
+        // elapsedRealtime não é afetado por mudança de hora do sistema e é o que
+        // o Chronometer/Notification usam internamente pra animar sem travar.
+        endElapsedRealtime = SystemClock.elapsedRealtime() + (totalSeconds * 1000L);
+
+        startForeground(NOTIF_ID, buildNotification());
         scheduleTick();
         return START_STICKY;
     }
 
+    // Ainda mantemos um tick de 1s só pra atualizar a BARRA DE PROGRESSO
+    // (o texto do tempo em si já é renderizado nativamente pelo Android via chronometer,
+    // então não precisa mais recalcular/formatar string a cada segundo).
     private void scheduleTick() {
         if (tickRunnable != null) handler.removeCallbacks(tickRunnable);
         tickRunnable = new Runnable() {
             @Override
             public void run() {
                 long remainingMs = endTimeMillis - System.currentTimeMillis();
-                int remainingSec = (int) Math.max(0, remainingMs / 1000);
 
-                NotificationManagerCompat.from(RestTimerService.this)
-                    .notify(NOTIF_ID, buildNotification(totalSeconds, remainingSec));
-
-                if (remainingSec <= 0) {
+                if (remainingMs <= 0) {
                     finishTimer();
                 } else {
+                    NotificationManagerCompat.from(RestTimerService.this)
+                        .notify(NOTIF_ID, buildNotification());
                     handler.postDelayed(this, 1000);
                 }
             }
@@ -96,14 +104,27 @@ public class RestTimerService extends Service {
             .setPriority(NotificationCompat.PRIORITY_LOW);
     }
 
-    private android.app.Notification buildNotification(int max, int remaining) {
-        int elapsed = max - remaining;
-        String text = formatTime(remaining) + " restantes";
-        return baseBuilder()
+    private android.app.Notification buildNotification() {
+        long remainingMs = Math.max(0, endTimeMillis - System.currentTimeMillis());
+        int remainingSec = (int) (remainingMs / 1000);
+        int elapsed = totalSeconds - remainingSec;
+
+        NotificationCompat.Builder builder = baseBuilder()
             .setContentTitle(title)
-            .setContentText(text)
-            .setProgress(max, elapsed, false)
-            .build();
+            .setProgress(totalSeconds, elapsed, false);
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+            // Chronometer nativo: o próprio Android anima a contagem regressiva
+            // a partir daqui, igual o app de Relógio. Sem drift, sem re-render manual.
+            builder.setUsesChronometer(true)
+                   .setChronometerCountDown(true)
+                   .setWhen(System.currentTimeMillis() + remainingMs);
+        } else {
+            // Fallback para versões antigas sem suporte a chronometer countdown
+            builder.setContentText(formatTime(remainingSec) + " restantes");
+        }
+
+        return builder.build();
     }
 
     private String formatTime(int seconds) {
