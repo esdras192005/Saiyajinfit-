@@ -95,7 +95,7 @@ public class RestTimerService extends Service {
         String timeText = String.format("%02d:%02d", secondsRemaining / 60, secondsRemaining % 60);
 
         NotificationCompat.Builder builder = new NotificationCompat.Builder(this, CHANNEL_ID)
-            .setSmallIcon(R.drawable.ic_notification)
+            .setSmallIcon(R.mipmap.ic_launcher)
             .setContentTitle("Descansando...")
             .setContentText(timeText)
             .setPriority(NotificationCompat.PRIORITY_LOW)
@@ -110,7 +110,7 @@ public class RestTimerService extends Service {
         Uri soundUri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION);
 
         NotificationCompat.Builder builder = new NotificationCompat.Builder(this, CHANNEL_ID)
-            .setSmallIcon(R.drawable.ic_notification)
+            .setSmallIcon(R.mipmap.ic_launcher)
             .setContentTitle("Descanso finalizado!")
             .setContentText("Hora de voltar pro treino 💪")
             .setPriority(NotificationCompat.PRIORITY_HIGH)
