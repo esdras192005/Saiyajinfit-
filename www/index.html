@@ -5405,6 +5405,19 @@ async function requestNativeNotifPermission() {
         vibration: true,
       });
     }
+    // A permissão de notificação sozinha NÃO garante que a notificação
+    // dispare na hora certa: a partir do Android 12, o sistema também exige
+    // que o usuário libere "alarmes exatos" pro app nas configurações.
+    // Sem isso, o Android agenda a notificação de forma aproximada e ela
+    // pode atrasar vários minutos, mesmo com allowWhileIdle: true.
+    if (LocalNotifications.checkExactNotificationSetting) {
+      try {
+        const exact = await LocalNotifications.checkExactNotificationSetting();
+        if (exact && exact.value !== 'granted' && LocalNotifications.changeExactNotificationSetting) {
+          await LocalNotifications.changeExactNotificationSetting();
+        }
+      } catch(e) {}
+    }
   } catch(e) {}
 }
 
