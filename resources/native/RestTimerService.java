@@ -5,13 +5,12 @@ import android.app.NotificationChannel;
 import android.app.NotificationManager;
 import android.app.PendingIntent;
 import android.app.Service;
+import android.content.Context;
 import android.content.Intent;
-import android.media.AudioAttributes;
-import android.media.RingtoneManager;
-import android.net.Uri;
 import android.os.Build;
-import android.os.CountDownTimer;
+import android.os.Handler;
 import android.os.IBinder;
+import android.os.Looper;
 
 import androidx.annotation.Nullable;
 import androidx.core.app.NotificationCompat;
@@ -19,115 +18,127 @@ import androidx.core.app.NotificationManagerCompat;
 
 public class RestTimerService extends Service {
 
-    private static final String CHANNEL_ID = "rest_timer_channel_v2";
-    private static final int RUNNING_NOTIFICATION_ID = 1001;
-    private static final int FINISHED_NOTIFICATION_ID = 1002;
+    // Mesmo canal já criado pelo RestNotificationPlugin (ensureChannel),
+    // pra não duplicar canais e manter tudo consistente.
+    private static final String CHANNEL_ID = "rest-progress";
+    private static final int NOTIFICATION_ID = 991200; // igual ao REST_PROGRESS_NOTIF_ID do JS
 
-    private CountDownTimer countDownTimer;
-
-    public static final String EXTRA_DURATION_MS = "duration_ms";
+    private Handler handler;
+    private Runnable tickRunnable;
+    private long endTimeMillis;
+    private int totalSeconds;
+    private String title = "⏱ Repouso";
 
     @Override
     public void onCreate() {
         super.onCreate();
-        createNotificationChannel();
+        handler = new Handler(Looper.getMainLooper());
+        ensureChannel();
     }
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
-        long durationMs = 60000L;
-        if (intent != null) {
-            durationMs = intent.getLongExtra(EXTRA_DURATION_MS, 60000L);
+        if (intent != null && "STOP".equals(intent.getAction())) {
+            stopTimer();
+            return START_NOT_STICKY;
         }
 
-        startForeground(RUNNING_NOTIFICATION_ID, buildRunningNotification(durationMs));
+        totalSeconds = intent != null ? intent.getIntExtra("seconds", 90) : 90;
+        String incomingTitle = intent != null ? intent.getStringExtra("title") : null;
+        title = incomingTitle != null ? incomingTitle : "⏱ Repouso";
 
-        if (countDownTimer != null) {
-            countDownTimer.cancel();
-        }
+        // Fonte da verdade: relógio real (System.currentTimeMillis()), igual ao
+        // Date.now() usado no JS (restEndTime). É isso que garante que a
+        // notificação e a tela do app nunca fiquem dessincronizadas.
+        endTimeMillis = System.currentTimeMillis() + (totalSeconds * 1000L);
 
-        countDownTimer = new CountDownTimer(durationMs, 1000) {
-            @Override
-            public void onTick(long millisUntilFinished) {
-                NotificationManagerCompat.from(RestTimerService.this)
-                    .notify(RUNNING_NOTIFICATION_ID, buildRunningNotification(millisUntilFinished));
-            }
-
-            @Override
-            public void onFinish() {
-                showTimerFinishedNotification();
-                stopForeground(true);
-                stopSelf();
-            }
-        }.start();
+        startForeground(NOTIFICATION_ID, buildNotification(totalSeconds));
+        startTicking();
 
         return START_STICKY;
     }
 
-    private void createNotificationChannel() {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return;
+    private void startTicking() {
+        if (tickRunnable != null) {
+            handler.removeCallbacks(tickRunnable);
+        }
+        tickRunnable = new Runnable() {
+            @Override
+            public void run() {
+                long remainingMs = endTimeMillis - System.currentTimeMillis();
+                int remainingSec = (int) Math.max(0, Math.round(remainingMs / 1000.0));
 
-        NotificationManager manager = getSystemService(NotificationManager.class);
-        if (manager == null) return;
+                if (remainingSec <= 0) {
+                    stopTimer();
+                    return;
+                }
 
-        NotificationChannel channel = new NotificationChannel(
-            CHANNEL_ID,
-            "Timer de Descanso",
-            NotificationManager.IMPORTANCE_HIGH
-        );
-        channel.setDescription("Notificações de fim de descanso");
-        channel.enableVibration(true);
-        channel.setVibrationPattern(new long[]{0, 500, 200, 500});
-        channel.setLockscreenVisibility(Notification.VISIBILITY_PUBLIC);
+                NotificationManagerCompat.from(RestTimerService.this)
+                    .notify(NOTIFICATION_ID, buildNotification(remainingSec));
 
-        Uri soundUri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION);
-        AudioAttributes audioAttributes = new AudioAttributes.Builder()
-            .setUsage(AudioAttributes.USAGE_NOTIFICATION)
-            .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
-            .build();
-        channel.setSound(soundUri, audioAttributes);
-
-        manager.createNotificationChannel(channel);
+                handler.postDelayed(this, 1000);
+            }
+        };
+        handler.post(tickRunnable);
     }
 
-    private Notification buildRunningNotification(long millisRemaining) {
-        long secondsRemaining = millisRemaining / 1000;
-        String timeText = String.format("%02d:%02d", secondsRemaining / 60, secondsRemaining % 60);
+    private void stopTimer() {
+        if (handler != null && tickRunnable != null) {
+            handler.removeCallbacks(tickRunnable);
+        }
+        stopForeground(true);
+        stopSelf();
+    }
 
-        NotificationCompat.Builder builder = new NotificationCompat.Builder(this, CHANNEL_ID)
-            .setSmallIcon(R.mipmap.ic_launcher)
-            .setContentTitle("Descansando...")
-            .setContentText(timeText)
-            .setPriority(NotificationCompat.PRIORITY_LOW)
-            .setOnlyAlertOnce(true)
+    private Notification buildNotification(int remainingSeconds) {
+        int m = remainingSeconds / 60;
+        int s = remainingSeconds % 60;
+        String txt = m > 0 ? String.format("%d:%02d", m, s) : s + "s";
+        int elapsed = Math.max(0, totalSeconds - remainingSeconds);
+
+        Context ctx = getApplicationContext();
+        Intent openIntent = ctx.getPackageManager().getLaunchIntentForPackage(ctx.getPackageName());
+        int piFlags = PendingIntent.FLAG_UPDATE_CURRENT
+            | (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M ? PendingIntent.FLAG_IMMUTABLE : 0);
+        PendingIntent contentIntent = openIntent != null
+            ? PendingIntent.getActivity(ctx, 0, openIntent, piFlags)
+            : null;
+
+        NotificationCompat.Builder builder = new NotificationCompat.Builder(ctx, CHANNEL_ID)
+            .setSmallIcon(ctx.getApplicationInfo().icon)
+            .setContentTitle(title + " " + txt)
+            .setContentText("Hora de voltar ao treino 💪")
+            .setProgress(totalSeconds, elapsed, false)
             .setOngoing(true)
-            .setCategory(NotificationCompat.CATEGORY_PROGRESS);
+            .setOnlyAlertOnce(true)
+            .setPriority(NotificationCompat.PRIORITY_LOW);
+
+        if (contentIntent != null) {
+            builder.setContentIntent(contentIntent);
+        }
 
         return builder.build();
     }
 
-    private void showTimerFinishedNotification() {
-        Uri soundUri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION);
-
-        NotificationCompat.Builder builder = new NotificationCompat.Builder(this, CHANNEL_ID)
-            .setSmallIcon(R.mipmap.ic_launcher)
-            .setContentTitle("Descanso finalizado!")
-            .setContentText("Hora de voltar pro treino 💪")
-            .setPriority(NotificationCompat.PRIORITY_HIGH)
-            .setCategory(NotificationCompat.CATEGORY_ALARM)
-            .setSound(soundUri)
-            .setVibrate(new long[]{0, 500, 200, 500})
-            .setOnlyAlertOnce(false)
-            .setAutoCancel(true);
-
-        NotificationManagerCompat.from(this).notify(FINISHED_NOTIFICATION_ID, builder.build());
+    private void ensureChannel() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            NotificationManager nm = (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
+            if (nm != null && nm.getNotificationChannel(CHANNEL_ID) == null) {
+                NotificationChannel channel = new NotificationChannel(
+                    CHANNEL_ID, "Progresso do descanso",
+                    NotificationManager.IMPORTANCE_LOW
+                );
+                channel.setDescription("Barra de progresso do descanso entre séries");
+                nm.createNotificationChannel(channel);
+            }
+        }
     }
 
     @Override
     public void onDestroy() {
         super.onDestroy();
-        if (countDownTimer != null) {
-            countDownTimer.cancel();
+        if (handler != null && tickRunnable != null) {
+            handler.removeCallbacks(tickRunnable);
         }
     }
 
