@@ -1,162 +1,139 @@
 package com.esdras.saiyajinfit;
 
+import android.app.Notification;
 import android.app.NotificationChannel;
 import android.app.NotificationManager;
 import android.app.PendingIntent;
 import android.app.Service;
-import android.content.Context;
 import android.content.Intent;
+import android.media.AudioAttributes;
+import android.media.RingtoneManager;
+import android.net.Uri;
 import android.os.Build;
-import android.os.Handler;
+import android.os.CountDownTimer;
 import android.os.IBinder;
-import android.os.Looper;
-import android.os.SystemClock;
+
+import androidx.annotation.Nullable;
 import androidx.core.app.NotificationCompat;
 import androidx.core.app.NotificationManagerCompat;
 
 public class RestTimerService extends Service {
 
-    public static final String CHANNEL_ID = "rest-progress";
-    public static final int NOTIF_ID = 991200;
+    private static final String CHANNEL_ID = "rest_timer_channel_v2";
+    private static final int RUNNING_NOTIFICATION_ID = 1001;
+    private static final int FINISHED_NOTIFICATION_ID = 1002;
 
-    private Handler handler;
-    private Runnable tickRunnable;
-    private long endTimeMillis;      // wall-clock alvo (System.currentTimeMillis)
-    private long endElapsedRealtime; // alvo em relógio "de boot" (usado pelo Chronometer)
-    private int totalSeconds;
-    private String title;
+    private CountDownTimer countDownTimer;
 
-    private void ensureChannel() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            NotificationManager nm = (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
-            if (nm.getNotificationChannel(CHANNEL_ID) == null) {
-                NotificationChannel channel = new NotificationChannel(
-                    CHANNEL_ID, "Progresso do descanso", NotificationManager.IMPORTANCE_LOW
-                );
-                channel.setDescription("Barra de progresso do descanso entre séries");
-                nm.createNotificationChannel(channel);
-            }
-        }
-    }
+    public static final String EXTRA_DURATION_MS = "duration_ms";
 
     @Override
     public void onCreate() {
         super.onCreate();
-        handler = new Handler(Looper.getMainLooper());
-        ensureChannel();
+        createNotificationChannel();
     }
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
-        if (intent != null && "STOP".equals(intent.getAction())) {
-            stopTimer();
-            return START_NOT_STICKY;
+        long durationMs = 60000L;
+        if (intent != null) {
+            durationMs = intent.getLongExtra(EXTRA_DURATION_MS, 60000L);
         }
 
-        totalSeconds = intent.getIntExtra("seconds", 90);
-        title = intent.getStringExtra("title");
-        if (title == null) title = "Descanso";
+        startForeground(RUNNING_NOTIFICATION_ID, buildRunningNotification(durationMs));
 
-        long now = System.currentTimeMillis();
-        endTimeMillis = now + (totalSeconds * 1000L);
-        // elapsedRealtime não é afetado por mudança de hora do sistema e é o que
-        // o Chronometer/Notification usam internamente pra animar sem travar.
-        endElapsedRealtime = SystemClock.elapsedRealtime() + (totalSeconds * 1000L);
+        if (countDownTimer != null) {
+            countDownTimer.cancel();
+        }
 
-        startForeground(NOTIF_ID, buildNotification());
-        scheduleTick();
+        countDownTimer = new CountDownTimer(durationMs, 1000) {
+            @Override
+            public void onTick(long millisUntilFinished) {
+                NotificationManagerCompat.from(RestTimerService.this)
+                    .notify(RUNNING_NOTIFICATION_ID, buildRunningNotification(millisUntilFinished));
+            }
+
+            @Override
+            public void onFinish() {
+                showTimerFinishedNotification();
+                stopForeground(true);
+                stopSelf();
+            }
+        }.start();
+
         return START_STICKY;
     }
 
-    // Ainda mantemos um tick de 1s só pra atualizar a BARRA DE PROGRESSO
-    // (o texto do tempo em si já é renderizado nativamente pelo Android via chronometer,
-    // então não precisa mais recalcular/formatar string a cada segundo).
-    private void scheduleTick() {
-        if (tickRunnable != null) handler.removeCallbacks(tickRunnable);
-        tickRunnable = new Runnable() {
-            @Override
-            public void run() {
-                long remainingMs = endTimeMillis - System.currentTimeMillis();
+    private void createNotificationChannel() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return;
 
-                if (remainingMs <= 0) {
-                    finishTimer();
-                } else {
-                    NotificationManagerCompat.from(RestTimerService.this)
-                        .notify(NOTIF_ID, buildNotification());
-                    handler.postDelayed(this, 1000);
-                }
-            }
-        };
-        handler.post(tickRunnable);
+        NotificationManager manager = getSystemService(NotificationManager.class);
+        if (manager == null) return;
+
+        NotificationChannel channel = new NotificationChannel(
+            CHANNEL_ID,
+            "Timer de Descanso",
+            NotificationManager.IMPORTANCE_HIGH
+        );
+        channel.setDescription("Notificações de fim de descanso");
+        channel.enableVibration(true);
+        channel.setVibrationPattern(new long[]{0, 500, 200, 500});
+        channel.setLockscreenVisibility(Notification.VISIBILITY_PUBLIC);
+
+        Uri soundUri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION);
+        AudioAttributes audioAttributes = new AudioAttributes.Builder()
+            .setUsage(AudioAttributes.USAGE_NOTIFICATION)
+            .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+            .build();
+        channel.setSound(soundUri, audioAttributes);
+
+        manager.createNotificationChannel(channel);
     }
 
-    private NotificationCompat.Builder baseBuilder() {
-        Intent openIntent = getPackageManager().getLaunchIntentForPackage(getPackageName());
-        int flags = PendingIntent.FLAG_UPDATE_CURRENT
-            | (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M ? PendingIntent.FLAG_IMMUTABLE : 0);
-        PendingIntent contentIntent = PendingIntent.getActivity(this, 0, openIntent, flags);
+    private Notification buildRunningNotification(long millisRemaining) {
+        long secondsRemaining = millisRemaining / 1000;
+        String timeText = String.format("%02d:%02d", secondsRemaining / 60, secondsRemaining % 60);
 
-        return new NotificationCompat.Builder(this, CHANNEL_ID)
-            .setSmallIcon(getApplicationInfo().icon)
-            .setOngoing(true)
+        NotificationCompat.Builder builder = new NotificationCompat.Builder(this, CHANNEL_ID)
+            .setSmallIcon(R.drawable.ic_notification)
+            .setContentTitle("Descansando...")
+            .setContentText(timeText)
+            .setPriority(NotificationCompat.PRIORITY_LOW)
             .setOnlyAlertOnce(true)
-            .setContentIntent(contentIntent)
-            .setPriority(NotificationCompat.PRIORITY_LOW);
-    }
-
-    private android.app.Notification buildNotification() {
-        long remainingMs = Math.max(0, endTimeMillis - System.currentTimeMillis());
-        int remainingSec = (int) (remainingMs / 1000);
-        int elapsed = totalSeconds - remainingSec;
-
-        NotificationCompat.Builder builder = baseBuilder()
-            .setContentTitle(title)
-            .setProgress(totalSeconds, elapsed, false);
-
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-            // Chronometer nativo: o próprio Android anima a contagem regressiva
-            // a partir daqui, igual o app de Relógio. Sem drift, sem re-render manual.
-            builder.setUsesChronometer(true)
-                   .setChronometerCountDown(true)
-                   .setWhen(System.currentTimeMillis() + remainingMs);
-        } else {
-            // Fallback para versões antigas sem suporte a chronometer countdown
-            builder.setContentText(formatTime(remainingSec) + " restantes");
-        }
+            .setOngoing(true)
+            .setCategory(NotificationCompat.CATEGORY_PROGRESS);
 
         return builder.build();
     }
 
-    private String formatTime(int seconds) {
-        int m = seconds / 60;
-        int s = seconds % 60;
-        return String.format("%d:%02d", m, s);
-    }
+    private void showTimerFinishedNotification() {
+        Uri soundUri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION);
 
-    private void finishTimer() {
-        NotificationManagerCompat.from(this).notify(NOTIF_ID, baseBuilder()
-            .setContentTitle(title)
-            .setContentText("Hora de voltar ao treino \uD83D\uDCAA")
-            .setProgress(0, 0, false)
-            .setOngoing(false)
-            .build());
-        stopForeground(Service.STOP_FOREGROUND_DETACH);
-        stopSelf();
-    }
+        NotificationCompat.Builder builder = new NotificationCompat.Builder(this, CHANNEL_ID)
+            .setSmallIcon(R.drawable.ic_notification)
+            .setContentTitle("Descanso finalizado!")
+            .setContentText("Hora de voltar pro treino 💪")
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setCategory(NotificationCompat.CATEGORY_ALARM)
+            .setSound(soundUri)
+            .setVibrate(new long[]{0, 500, 200, 500})
+            .setOnlyAlertOnce(false)
+            .setAutoCancel(true);
 
-    private void stopTimer() {
-        if (handler != null && tickRunnable != null) handler.removeCallbacks(tickRunnable);
-        NotificationManagerCompat.from(this).cancel(NOTIF_ID);
-        stopForeground(Service.STOP_FOREGROUND_REMOVE);
-        stopSelf();
+        NotificationManagerCompat.from(this).notify(FINISHED_NOTIFICATION_ID, builder.build());
     }
 
     @Override
     public void onDestroy() {
-        if (handler != null && tickRunnable != null) handler.removeCallbacks(tickRunnable);
         super.onDestroy();
+        if (countDownTimer != null) {
+            countDownTimer.cancel();
+        }
     }
 
+    @Nullable
     @Override
-    public IBinder onBind(Intent intent) { return null; }
+    public IBinder onBind(Intent intent) {
+        return null;
+    }
 }
